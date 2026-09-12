@@ -1,0 +1,4 @@
+To run this program under Windows, you need to install the Silicon Labs USBXpressHostSDK for Windows. It can be
+downloaded from https://www.silabs.com/support/resources?query=usbxpresshostsdk
+In the installation directory, you will find the CP210xRuntime.dll. Copy this file into this directory. It will be
+automatically copied into the build directory.

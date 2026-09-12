@@ -1,0 +1,207 @@
+# CP2102N Serial IO Control
+
+`cp2102n-serial-io-control` lists Silicon Labs CP2102N serial devices and sets
+the runtime output state of the Adafruit CP2102N Friend's exposed `IO2` and
+`IO3` pins. It uses the normal VCP serial driver on Windows and the kernel
+CP210x/GPIOLIB interface on Linux. It does **not** replace the serial driver
+with WinUSB/libusb and it does not transfer serial data for another program.
+
+The default device identity is Silicon Labs VID `0x10C4`, PID `0xEA60`.
+Custom VID/PID matching is not supported in this version.
+
+## Commands
+
+Run the binary as `cp2102n-serial-io-control` below, or use `cargo run --` while
+developing:
+
+```text
+# List every matching device, sorted by reported port name.
+cp2102n-serial-io-control list
+
+# Print one matching device's metadata.
+cp2102n-serial-io-control list --port /dev/ttyUSB0
+
+# Linux examples.
+cp2102n-serial-io-control set --port /dev/ttyUSB0 --pin 2 --state high
+cp2102n-serial-io-control set --port /dev/ttyUSB0 --pin 3 --state low
+
+# Windows examples.
+cp2102n-serial-io-control set --port COM7 --pin 2 --state high
+cp2102n-serial-io-control set --port COM12 --pin 3 --state low
+```
+
+`--port` is required by `set` and must be the exact port reported by
+`list`: `COM<number>` on Windows or `/dev/ttyUSB<number>`/
+`/dev/ttyACM<number>` on Linux. Windows COM names are matched without regard
+to case; Linux paths are matched exactly. There is no implicit "first device"
+selection. A missing or ambiguous match is an error.
+
+Only pin `2` (`GPIO2`, Adafruit `IO2`) and pin `3` (`GPIO3`, Adafruit `IO3`)
+are accepted. `--state` is `high` or `low`, case-insensitively. A successful
+command prints a short confirmation and exits with status zero; failures print
+an actionable diagnostic to stderr and return a nonzero status.
+
+The `list` output contains the reported port, VID/PID, USB serial number,
+manufacturer, and product string. Missing USB descriptor fields are shown as
+`<none>`. GPIO availability is not probed by `list`; Linux port-to-gpiochip
+association and line availability are checked when `set` runs.
+
+## Hardware wiring and safety
+
+Before connecting a target circuit, power the board down and consult the
+Adafruit CP2102N Friend documentation for the board's signal voltage and
+current limits:
+
+* Connect `IO2` to the target input controlled by GPIO2 and `IO3` to the
+  target input controlled by GPIO3. Connect the board and target grounds.
+* Do not tie the two CP2102N outputs together, connect either output to another
+  actively driven output, or use these pins as a level shifter. Confirm that
+  the target accepts the board's logic-high voltage.
+* Keep the board's persistent CP2102N configuration prepared for GPIO2/GPIO3
+  output use. This tool changes only the runtime latch/output state; it does
+  not program configuration memory, change alternate functions, or configure
+  pull/open-drain behavior.
+* A reset, unplug/replug, or power cycle may restore the configured/default
+  state. Do not use this command as a substitute for a safety interlock.
+* Verify the selected port and pin before every hardware write. Test first on
+  an unloaded input or other non-critical circuit.
+
+The Windows backend reads the current latch and writes only the selected bit,
+preserving unrelated latch bits. The Linux backend requests only the selected
+line as an output with the requested value; it does not probe or reconfigure
+the other supported line.
+
+## Windows setup
+
+1. Install the Silicon Labs CP210x **VCP** driver appropriate for the board
+   and confirm that the board appears as the expected `COM<number>` in Device
+   Manager. Leave that driver installed; replacing it with WinUSB/libusb is not
+   supported by the normal workflow.
+2. Build the project normally on Windows. The build stages the vendor
+   `third_party/CP210xRuntime.dll` beside the executable in each Cargo profile:
+
+   ```text
+   target\debug\cp2102n-serial-io-control.exe
+   target\debug\CP210xRuntime.dll
+   target\release\cp2102n-serial-io-control.exe
+   target\release\CP210xRuntime.dll
+   ```
+
+   The executable loads only the DLL beside itself; a DLL found through the
+   caller's working directory or `PATH` is not used. For a release
+   distribution, ship the executable and `CP210xRuntime.dll` together in the
+   same directory. The DLL architecture must match the executable, and it
+   must export `CP210xRT_ReadLatch` and `CP210xRT_WriteLatch`.
+3. The runtime DLL is a vendor binary. Use a Silicon Labs/vendor-approved
+   CP2102N-compatible version and verify that its applicable redistribution
+   terms permit shipping it with the application. Do not substitute an
+   unrelated runtime DLL or replace the required VCP driver with WinUSB/libusb.
+4. Check compatibility before relying on the tool in an application workflow:
+   run `list`, then test one GPIO state with the external serial application
+   closed. A runtime that can enumerate a COM port but does not support these
+   CP2102N runtime calls is not sufficient.
+
+The runtime DLL is loaded dynamically, so a missing DLL, missing export, or
+unsupported runtime operation is reported clearly at operation time. Runtime
+DLL versions and CP2102N support can differ; keep a known-good, compatible
+copy beside the deployed executable. The VCP driver remains required for COM
+enumeration and access even when the runtime DLL is present.
+
+The application opens the COM handle without sharing it. If the external
+serial application already owns the port exclusively, `set` reports that the
+port is in use; it does not reset, reconfigure, or interrupt that connection.
+Close or pause the external application, perform the GPIO change, and reopen
+it. The VCP driver and the COM mapping remain installed throughout.
+
+## Linux setup
+
+Linux uses the existing kernel `cp210x` serial driver and GPIO character
+devices through `gpio-cdev`. The running kernel must provide:
+
+* CP210x GPIO/GPIOLIB support in the `cp210x` driver;
+* GPIO character-device support (`CONFIG_GPIO_CDEV`); and
+* an associated `/dev/gpiochipN` exposing the CP2102N lines.
+
+The tool does not assume `gpiochip0`. For a selected `/dev/ttyUSB*` or
+`/dev/ttyACM*`, it resolves `/sys/class/tty/<tty>/device`, enumerates
+`/sys/class/gpio/gpiochip*/device`, and selects the most specific matching
+sysfs topology. This avoids depending on the global gpiochip number, which can
+change when devices are added or reordered. An equally specific ambiguous
+mapping is rejected.
+
+The invoking user needs access to **both** the selected serial device and the
+associated GPIO character device. Use the distro's udev mechanism to assign
+appropriate ownership/group/mode for the board and gpiochip; a rule that only
+grants access to `/dev/ttyUSB0` is not sufficient. Inspect the result with:
+
+```text
+ls -l /dev/ttyUSB0 /dev/gpiochip*
+udevadm info --query=all --name=/dev/ttyUSB0
+readlink -f /sys/class/tty/ttyUSB0/device
+readlink -f /sys/class/gpio/gpiochipN/device
+```
+
+Replace `ttyUSB0` and `gpiochipN` with the values for the selected board.
+After changing udev rules, reload the rules and replug the board according to
+the distribution's procedure. Do not grant broad write access to all GPIO
+chips when a narrower board-specific rule is possible.
+
+Each Linux `set` operation opens the associated chip, requests only GPIO2 or
+GPIO3 as an output, sets its value, and releases the line. A line claimed by
+another kernel or userspace consumer is reported as busy rather than forcibly
+taken. The selected GPIO must already be available as a usable output in the
+CP2102N configuration.
+
+## Port ownership and limitations
+
+The serial port is used only for discovery and device association; this tool
+does not own the external application's serial protocol or send serial data.
+Nevertheless, changing a GPIO is a device operation and can require opening
+the VCP/tty or GPIO character device. A process that holds the needed resource
+exclusively can prevent `set` from running. The tool never kills a process,
+steals a GPIO line, replaces a driver, or silently falls back to raw USB.
+
+Supported scope is intentionally limited to the default CP2102N VID/PID,
+GPIO2/GPIO3 output state, and transient runtime changes. Serial configuration,
+GPIO input/event monitoring, persistent CP2102N configuration programming,
+arbitrary custom VID/PID devices, and output-mode reconfiguration are out of
+scope.
+
+## Troubleshooting
+
+* **No matching devices:** confirm the board is connected, the VCP/kernel
+  driver is installed, and its USB identity is `10C4:EA60`. On Linux also
+  check permissions for the tty. Use `list` before `set`.
+* **Port selector rejected/not found:** copy the port name exactly from
+  `list`; do not use a `/dev/ttyS*` path or a guessed COM number.
+* **Windows runtime DLL error:** verify that the executable and
+  `CP210xRuntime.dll` are in the same directory, that the DLL matches the
+  executable architecture, and that it exports both latch functions. For a
+  Cargo build, rebuild or restore the staged DLL from
+  `third_party/CP210xRuntime.dll`; the loader does not fall back to `PATH`.
+  Also confirm that the Silicon Labs CP210x VCP driver is installed and the
+  board has an assigned COM port. Do not solve this by replacing the VCP
+  driver.
+* **Windows port held exclusively:** close the external serial application and
+  retry. The error is intentional protection of the existing connection.
+* **Linux no associated gpiochip:** check CP210x GPIO/GPIOLIB and
+  `CONFIG_GPIO_CDEV`, `/sys/class/gpio`, udev-created `/dev/gpiochipN`, and the
+  selected tty's sysfs topology. The number is not required to be zero.
+* **Linux permission denied:** grant the invoking user access to both the tty
+  and the associated gpiochip, then replug/recheck device permissions.
+* **GPIO line busy/unavailable:** stop the other GPIO consumer and verify that
+  GPIO2/GPIO3 are configured as GPIO outputs rather than an alternate function.
+* **Electrical level is unexpected:** recheck common ground, wiring, target
+  voltage compatibility, pull/open-drain configuration, and whether a reset
+  restored the device's configured state.
+
+## Development and validation
+
+Tests exercise parsing, identity/selector matching, latch calculations,
+Windows pure helpers, and Linux sysfs mapping/planning without writing to real
+hardware. Hardware validation is a separate smoke test: verify the installed
+driver/runtime or kernel support, run `list`, and test both supported pins and
+both states on a non-critical circuit while monitoring the serial application.
+
+See `AGENTS.md` for repository conventions, platform boundaries, safe hardware
+rules, and the complete validation command set.
