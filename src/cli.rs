@@ -23,6 +23,8 @@ pub enum Command {
     List(ListArgs),
     /// Set a CP2102N GPIO output state.
     Set(SetArgs),
+    /// Read a CP2102N GPIO output state.
+    Get(GetArgs),
 }
 
 #[derive(Debug, Args, PartialEq, Eq)]
@@ -43,6 +45,16 @@ pub struct SetArgs {
     /// Requested output latch state.
     #[arg(long, value_enum, ignore_case = true, value_name = "high|low")]
     pub state: OutputState,
+}
+
+#[derive(Debug, Args, PartialEq, Eq)]
+pub struct GetArgs {
+    /// Reported serial port name, such as COM3 or /dev/ttyUSB0.
+    #[arg(long, value_name = "PORT")]
+    pub port: PortSelector,
+    /// CP2102N GPIO number; only GPIO2 and GPIO3 are supported.
+    #[arg(long, value_enum, value_name = "2|3")]
+    pub pin: Pin,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -79,7 +91,7 @@ impl fmt::Display for Pin {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, ListArgs, OutputState, Pin, SetArgs};
+    use super::{Cli, Command, GetArgs, ListArgs, OutputState, Pin, SetArgs};
     use clap::Parser;
 
     #[test]
@@ -114,6 +126,48 @@ mod tests {
     }
 
     #[test]
+    fn parses_get_arguments_and_normalizes_windows_port() {
+        let cli = Cli::try_parse_from([
+            "cp2102n-serial-io-control",
+            "get",
+            "--port",
+            "com12",
+            "--pin",
+            "3",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.command,
+            Command::Get(GetArgs {
+                port: "COM12".parse().unwrap(),
+                pin: Pin::Gpio3,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_get_arguments_for_linux_port() {
+        let cli = Cli::try_parse_from([
+            "cp2102n-serial-io-control",
+            "get",
+            "--port",
+            "/dev/ttyUSB0",
+            "--pin",
+            "2",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.command,
+            Command::Get(GetArgs {
+                port: "/dev/ttyUSB0".parse().unwrap(),
+                pin: Pin::Gpio2,
+            })
+        );
+    }
+
+    #[test]
     fn rejects_unsupported_pin() {
         let result = Cli::try_parse_from([
             "cp2102n-serial-io-control",
@@ -124,6 +178,27 @@ mod tests {
             "4",
             "--state",
             "low",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_get_without_required_arguments() {
+        let result = Cli::try_parse_from(["cp2102n-serial-io-control", "get"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_unsupported_get_pin() {
+        let result = Cli::try_parse_from([
+            "cp2102n-serial-io-control",
+            "get",
+            "--port",
+            "COM3",
+            "--pin",
+            "4",
         ]);
 
         assert!(result.is_err());

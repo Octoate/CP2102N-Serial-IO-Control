@@ -60,6 +60,23 @@ pub const fn update_latch(latch: u8, pin: GpioPin, state: OutputState) -> u8 {
     }
 }
 
+pub const fn state_from_latch(latch: u8, pin: GpioPin) -> OutputState {
+    if latch & pin.mask() == 0 {
+        OutputState::Low
+    } else {
+        OutputState::High
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub const fn state_from_value(value: u8) -> Option<OutputState> {
+    match value {
+        0 => Some(OutputState::Low),
+        1 => Some(OutputState::High),
+        _ => None,
+    }
+}
+
 pub trait GpioController {
     fn read_latch(&mut self, port: &str) -> Result<u8, AppError>;
 
@@ -80,9 +97,22 @@ pub fn set_pin<C: GpioController>(
     controller.write_latch(port, pin.mask(), new_latch)
 }
 
+pub fn read_pin<C: GpioController>(
+    controller: &mut C,
+    port: &str,
+    pin: GpioPin,
+) -> Result<OutputState, AppError> {
+    controller
+        .read_latch(port)
+        .map(|latch| state_from_latch(latch, pin))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GpioController, GpioPin, OutputState, set_pin, update_latch};
+    use super::{
+        GpioController, GpioPin, OutputState, read_pin, set_pin, state_from_latch,
+        state_from_value, update_latch,
+    };
     use crate::error::AppError;
 
     #[test]
@@ -99,6 +129,37 @@ mod tests {
             update_latch(0b1111_1111, GpioPin::Gpio3, OutputState::Low),
             0b1111_0111
         );
+    }
+
+    #[test]
+    fn decodes_gpio2_latch_bit_to_both_states() {
+        assert_eq!(
+            state_from_latch(0b1010_0000, GpioPin::Gpio2),
+            OutputState::Low
+        );
+        assert_eq!(
+            state_from_latch(0b1010_0100, GpioPin::Gpio2),
+            OutputState::High
+        );
+    }
+
+    #[test]
+    fn decodes_gpio3_latch_bit_to_both_states() {
+        assert_eq!(
+            state_from_latch(0b1010_0000, GpioPin::Gpio3),
+            OutputState::Low
+        );
+        assert_eq!(
+            state_from_latch(0b1010_1000, GpioPin::Gpio3),
+            OutputState::High
+        );
+    }
+
+    #[test]
+    fn decodes_only_binary_line_values() {
+        assert_eq!(state_from_value(0), Some(OutputState::Low));
+        assert_eq!(state_from_value(1), Some(OutputState::High));
+        assert_eq!(state_from_value(2), None);
     }
 
     #[test]
@@ -139,5 +200,23 @@ mod tests {
             controller.write,
             Some(("COM7".to_owned(), 0b0000_0100, 0b1010_0100))
         );
+    }
+
+    #[test]
+    fn controller_service_reads_selected_pin_state() {
+        let mut controller = FakeController {
+            current_latch: 0b1010_1000,
+            ..FakeController::default()
+        };
+
+        assert_eq!(
+            read_pin(&mut controller, "/dev/ttyUSB0", GpioPin::Gpio3).unwrap(),
+            OutputState::High
+        );
+        assert_eq!(
+            read_pin(&mut controller, "/dev/ttyUSB0", GpioPin::Gpio2).unwrap(),
+            OutputState::Low
+        );
+        assert_eq!(controller.write, None);
     }
 }

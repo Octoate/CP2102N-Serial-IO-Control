@@ -29,6 +29,11 @@ pub fn set_pin(port: &str, pin: GpioPin, state: OutputState) -> Result<(), AppEr
     gpio::set_pin(&mut controller, port, pin, state)
 }
 
+pub fn get_pin(port: &str, pin: GpioPin) -> Result<OutputState, AppError> {
+    let mut controller = WindowsGpioController::new()?;
+    gpio::read_pin(&mut controller, port, pin)
+}
+
 struct WindowsGpioController {
     runtime: Runtime,
 }
@@ -204,7 +209,11 @@ fn runtime_status(operation: &str, status: u32) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ERROR_SHARING_VIOLATION, normalize_com_path, open_port_error, runtime_status};
+    use super::{
+        CP210X_DEVICE_IO_FAILED, ERROR_SHARING_VIOLATION, normalize_com_path, open_port_error,
+        runtime_status,
+    };
+    use crate::error::AppError;
 
     #[test]
     fn normalizes_single_digit_com_ports_for_create_file() {
@@ -226,6 +235,22 @@ mod tests {
                 .contains("does not support reading the GPIO latch")
         );
         assert!(error.to_string().contains("CP2102N-compatible"));
+    }
+
+    #[test]
+    fn translates_read_latch_io_failures() {
+        let error = runtime_status("reading the GPIO latch", CP210X_DEVICE_IO_FAILED).unwrap_err();
+        let message = error.to_string();
+
+        assert!(matches!(
+            &error,
+            AppError::RuntimeOperationFailed {
+                operation,
+                status: CP210X_DEVICE_IO_FAILED,
+                ..
+            } if operation == "reading the GPIO latch"
+        ));
+        assert!(message.contains("device I/O request failed"));
     }
 
     #[test]

@@ -1,10 +1,11 @@
 # CP2102N Serial IO Control
 
-`cp2102n-serial-io-control` lists Silicon Labs CP2102N serial devices and sets
-the runtime output state of the Adafruit CP2102N Friend's exposed `IO2` and
-`IO3` pins. It uses the normal VCP serial driver on Windows and the kernel
-CP210x/GPIOLIB interface on Linux. It does **not** replace the serial driver
-with WinUSB/libusb and it does not transfer serial data for another program.
+`cp2102n-serial-io-control` lists Silicon Labs CP2102N serial devices, reads
+their runtime GPIO level, and sets the runtime output state of the Adafruit
+CP2102N Friend's exposed `IO2` and `IO3` pins. It uses the normal VCP serial
+driver on Windows and the kernel CP210x/GPIOLIB interface on Linux. It does
+**not** replace the serial driver with WinUSB/libusb and it does not transfer
+serial data for another program.
 
 The default device identity is Silicon Labs VID `0x10C4`, PID `0xEA60`.
 Custom VID/PID matching is not supported in this version.
@@ -22,15 +23,19 @@ cp2102n-serial-io-control list
 cp2102n-serial-io-control list --port /dev/ttyUSB0
 
 # Linux examples.
+cp2102n-serial-io-control get --port /dev/ttyUSB0 --pin 2
 cp2102n-serial-io-control set --port /dev/ttyUSB0 --pin 2 --state high
+cp2102n-serial-io-control get --port /dev/ttyUSB0 --pin 3
 cp2102n-serial-io-control set --port /dev/ttyUSB0 --pin 3 --state low
 
 # Windows examples.
+cp2102n-serial-io-control get --port COM7 --pin 2
 cp2102n-serial-io-control set --port COM7 --pin 2 --state high
+cp2102n-serial-io-control get --port COM12 --pin 3
 cp2102n-serial-io-control set --port COM12 --pin 3 --state low
 ```
 
-`--port` is required by `set` and must be the exact port reported by
+`--port` is required by `get` and `set` and must be the exact port reported by
 `list`: `COM<number>` on Windows or `/dev/ttyUSB<number>`/
 `/dev/ttyACM<number>` on Linux. Windows COM names are matched without regard
 to case; Linux paths are matched exactly. There is no implicit "first device"
@@ -38,13 +43,17 @@ selection. A missing or ambiguous match is an error.
 
 Only pin `2` (`GPIO2`, Adafruit `IO2`) and pin `3` (`GPIO3`, Adafruit `IO3`)
 are accepted. `--state` is `high` or `low`, case-insensitively. A successful
-command prints a short confirmation and exits with status zero; failures print
-an actionable diagnostic to stderr and return a nonzero status.
+command prints a short confirmation and exits with status zero; `get` prints
+the selected runtime level as `high` or `low`, for example
+`get COM7 GPIO2 = high`. `get` reads the current GPIO latch/line value and
+does not write a GPIO value, change persistent configuration, or monitor
+edges/events. Failures print an actionable diagnostic to stderr and return a
+nonzero status.
 
 The `list` output contains the reported port, VID/PID, USB serial number,
 manufacturer, and product string. Missing USB descriptor fields are shown as
 `<none>`. GPIO availability is not probed by `list`; Linux port-to-gpiochip
-association and line availability are checked when `set` runs.
+association and line availability are checked when `get` or `set` runs.
 
 ## Hardware wiring and safety
 
@@ -66,10 +75,12 @@ current limits:
 * Verify the selected port and pin before every hardware write. Test first on
   an unloaded input or other non-critical circuit.
 
-The Windows backend reads the current latch and writes only the selected bit,
-preserving unrelated latch bits. The Linux backend requests only the selected
-line as an output with the requested value; it does not probe or reconfigure
-the other supported line.
+The Windows backend reads the current latch for `get` and writes only the
+selected bit for `set`, preserving unrelated latch bits. The Linux `get`
+backend requests only the selected line as-is, without requesting input/output
+direction or supplying a write value, then reads its value. It does not call a
+write operation or probe/reconfigure the other supported line. Linux `set`
+requests only the selected line as an output with the requested value.
 
 ## Windows setup
 
@@ -97,9 +108,9 @@ the other supported line.
    terms permit shipping it with the application. Do not substitute an
    unrelated runtime DLL or replace the required VCP driver with WinUSB/libusb.
 4. Check compatibility before relying on the tool in an application workflow:
-   run `list`, then test one GPIO state with the external serial application
-   closed. A runtime that can enumerate a COM port but does not support these
-   CP2102N runtime calls is not sufficient.
+   run `list`, then run `get` or test one GPIO state with the external serial
+   application closed. A runtime that can enumerate a COM port but does not
+   support these CP2102N runtime calls is not sufficient.
 
 The runtime DLL is loaded dynamically, so a missing DLL, missing export, or
 unsupported runtime operation is reported clearly at operation time. Runtime
@@ -108,10 +119,11 @@ copy beside the deployed executable. The VCP driver remains required for COM
 enumeration and access even when the runtime DLL is present.
 
 The application opens the COM handle without sharing it. If the external
-serial application already owns the port exclusively, `set` reports that the
-port is in use; it does not reset, reconfigure, or interrupt that connection.
-Close or pause the external application, perform the GPIO change, and reopen
-it. The VCP driver and the COM mapping remain installed throughout.
+serial application already owns the port exclusively, `get` and `set` report
+that the port is in use; neither command resets, reconfigures, or interrupts
+that connection. Close or pause the external application, perform the read or
+GPIO change, and reopen it. The VCP driver and the COM mapping remain installed
+throughout.
 
 ## Linux setup
 
@@ -146,62 +158,69 @@ After changing udev rules, reload the rules and replug the board according to
 the distribution's procedure. Do not grant broad write access to all GPIO
 chips when a narrower board-specific rule is possible.
 
-Each Linux `set` operation opens the associated chip, requests only GPIO2 or
-GPIO3 as an output, sets its value, and releases the line. A line claimed by
-another kernel or userspace consumer is reported as busy rather than forcibly
-taken. The selected GPIO must already be available as a usable output in the
-CP2102N configuration.
+Each Linux `get` operation opens the associated chip, requests only GPIO2 or
+GPIO3 with its current configuration left as-is, reads the line value, and
+releases the line. It does not call a write operation or change the line
+direction. A Linux `set` operation instead requests only the selected line as
+an output, sets its value, and releases the line. A line claimed by another
+kernel or userspace consumer is reported as busy rather than forcibly taken.
+The selected GPIO must already be available in the CP2102N configuration;
+`set` also requires it to be usable as an output.
 
 ## Port ownership and limitations
 
-The serial port is used only for discovery and device association; this tool
-does not own the external application's serial protocol or send serial data.
-Nevertheless, changing a GPIO is a device operation and can require opening
-the VCP/tty or GPIO character device. A process that holds the needed resource
-exclusively can prevent `set` from running. The tool never kills a process,
-steals a GPIO line, replaces a driver, or silently falls back to raw USB.
+The tool does not own the external application's serial protocol or send
+serial data. Discovery and device association use the reported port, while
+reading or changing a GPIO may also open the VCP/tty or GPIO character device.
+A process that holds the needed resource exclusively can prevent `get` or `set`
+from running. The tool never kills a process, steals a GPIO line, replaces a
+driver, or silently falls back to raw USB.
 
 Supported scope is intentionally limited to the default CP2102N VID/PID,
-GPIO2/GPIO3 output state, and transient runtime changes. Serial configuration,
-GPIO input/event monitoring, persistent CP2102N configuration programming,
-arbitrary custom VID/PID devices, and output-mode reconfiguration are out of
-scope.
+GPIO2/GPIO3 runtime level readback and transient output changes. Serial
+configuration, GPIO input/event monitoring, persistent CP2102N configuration
+programming, arbitrary custom VID/PID devices, and output-mode
+reconfiguration are out of scope.
 
 ## Troubleshooting
 
-* **No matching devices:** confirm the board is connected, the VCP/kernel
-  driver is installed, and its USB identity is `10C4:EA60`. On Linux also
-  check permissions for the tty. Use `list` before `set`.
+ * **No matching devices:** confirm the board is connected, the VCP/kernel
+   driver is installed, and its USB identity is `10C4:EA60`. On Linux also
+   check permissions for the tty. Use `list` before `get` or `set`.
 * **Port selector rejected/not found:** copy the port name exactly from
   `list`; do not use a `/dev/ttyS*` path or a guessed COM number.
 * **Windows runtime DLL error:** verify that the executable and
   `CP210xRuntime.dll` are in the same directory, that the DLL matches the
-  executable architecture, and that it exports both latch functions. For a
-  Cargo build, rebuild or restore the staged DLL from
+   executable architecture, and that it exports `CP210xRT_ReadLatch` for
+   `get` and both latch functions for `set`. For a Cargo build, rebuild or
+   restore the staged DLL from
   `third_party/CP210xRuntime.dll`; the loader does not fall back to `PATH`.
   Also confirm that the Silicon Labs CP210x VCP driver is installed and the
   board has an assigned COM port. Do not solve this by replacing the VCP
   driver.
-* **Windows port held exclusively:** close the external serial application and
-  retry. The error is intentional protection of the existing connection.
+ * **Windows port held exclusively:** close the external serial application and
+   retry `get` or `set`. The error is intentional protection of the existing
+   connection.
 * **Linux no associated gpiochip:** check CP210x GPIO/GPIOLIB and
   `CONFIG_GPIO_CDEV`, `/sys/class/gpio`, udev-created `/dev/gpiochipN`, and the
   selected tty's sysfs topology. The number is not required to be zero.
 * **Linux permission denied:** grant the invoking user access to both the tty
   and the associated gpiochip, then replug/recheck device permissions.
-* **GPIO line busy/unavailable:** stop the other GPIO consumer and verify that
-  GPIO2/GPIO3 are configured as GPIO outputs rather than an alternate function.
+ * **GPIO line busy/unavailable:** stop the other GPIO consumer and verify that
+   GPIO2/GPIO3 are configured as GPIOs rather than an alternate function. A
+   `set` operation additionally requires an output-capable configuration.
 * **Electrical level is unexpected:** recheck common ground, wiring, target
   voltage compatibility, pull/open-drain configuration, and whether a reset
   restored the device's configured state.
 
 ## Development and validation
 
-Tests exercise parsing, identity/selector matching, latch calculations,
-Windows pure helpers, and Linux sysfs mapping/planning without writing to real
-hardware. Hardware validation is a separate smoke test: verify the installed
-driver/runtime or kernel support, run `list`, and test both supported pins and
-both states on a non-critical circuit while monitoring the serial application.
+Tests exercise parsing, identity/selector matching, latch calculations and
+readback, Windows pure helpers, and Linux sysfs mapping/planning without
+opening a real serial/GPIO device or writing to hardware. Hardware validation
+is a separate smoke test: verify the installed driver/runtime or kernel
+support, run `list`, read both supported pins with `get`, and test both states
+with `set` on a non-critical circuit while monitoring the serial application.
 
 See `AGENTS.md` for repository conventions, platform boundaries, safe hardware
 rules, and the complete validation command set.

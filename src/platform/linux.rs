@@ -8,7 +8,7 @@ use gpio_cdev::{Chip, LineRequestFlags};
 
 use crate::{
     error::AppError,
-    gpio::{GpioPin, OutputState},
+    gpio::{self, GpioPin, OutputState},
 };
 
 const SYSFS_ROOT: &str = "/sys";
@@ -18,6 +18,11 @@ const CONSUMER: &str = "cp2102n-serial-io-control";
 pub fn set_pin(port: &str, pin: GpioPin, state: OutputState) -> Result<(), AppError> {
     let mut controller = LinuxGpioController::new();
     controller.set_output(port, pin, state)
+}
+
+pub fn get_pin(port: &str, pin: GpioPin) -> Result<OutputState, AppError> {
+    let mut controller = LinuxGpioController::new();
+    controller.read_input(port, pin)
 }
 
 struct LinuxGpioController {
@@ -67,6 +72,23 @@ impl LinuxGpioController {
             .set_value(value)
             .map_err(|error| map_gpio_operation(port, &chip_path, "setting GPIO output", error))
     }
+
+    fn read_input(&mut self, port: &str, pin: GpioPin) -> Result<OutputState, AppError> {
+        let (chip_path, mut chip) = self.open_chip(port)?;
+        let offset = read_request(pin);
+        let line = chip
+            .get_line(offset)
+            .map_err(|error| map_line_error(port, &chip_path, pin, error.to_string()))?;
+        let handle = line
+            .request(LineRequestFlags::empty(), 0, CONSUMER)
+            .map_err(|error| map_line_error(port, &chip_path, pin, error.to_string()))?;
+        let value = handle
+            .get_value()
+            .map_err(|error| map_gpio_operation(port, &chip_path, "reading GPIO value", error))?;
+
+        gpio::state_from_value(value)
+            .ok_or_else(|| invalid_gpio_value(port, &chip_path, pin, value))
+    }
 }
 
 fn output_request(pin: GpioPin, state: OutputState) -> (u32, u8) {
@@ -74,6 +96,22 @@ fn output_request(pin: GpioPin, state: OutputState) -> (u32, u8) {
         u32::from(pin.number()),
         u8::from(matches!(state, OutputState::High)),
     )
+}
+
+fn read_request(pin: GpioPin) -> u32 {
+    u32::from(pin.number())
+}
+
+fn invalid_gpio_value(port: &str, path: &Path, pin: GpioPin, value: u8) -> AppError {
+    AppError::LinuxGpioOperation {
+        port: port.to_owned(),
+        operation: "reading GPIO value".to_owned(),
+        details: format!(
+            "GPIO{} at {} returned unexpected value {value}; expected a binary value",
+            pin.number(),
+            path.display()
+        ),
+    }
 }
 
 #[derive(Debug)]
@@ -285,8 +323,8 @@ mod tests {
     };
 
     use super::{
-        find_gpiochip_for_port, is_busy_error, is_permission_error, output_request,
-        topology_matches,
+        find_gpiochip_for_port, invalid_gpio_value, is_busy_error, is_permission_error,
+        output_request, read_request, topology_matches,
     };
     use crate::{
         error::AppError,
@@ -348,6 +386,32 @@ mod tests {
     fn plans_only_the_selected_gpio_line_and_value() {
         assert_eq!(output_request(GpioPin::Gpio2, OutputState::High), (2, 1));
         assert_eq!(output_request(GpioPin::Gpio3, OutputState::Low), (3, 0));
+    }
+
+    #[test]
+    fn plans_read_for_only_the_selected_gpio_line() {
+        assert_eq!(read_request(GpioPin::Gpio2), 2);
+        assert_eq!(read_request(GpioPin::Gpio3), 3);
+    }
+
+    #[test]
+    fn rejects_non_binary_read_values_as_operation_errors() {
+        let error = invalid_gpio_value(
+            "/dev/ttyUSB0",
+            Path::new("/dev/gpiochip17"),
+            GpioPin::Gpio3,
+            2,
+        );
+        let message = error.to_string();
+
+        assert!(matches!(
+            &error,
+            AppError::LinuxGpioOperation {
+                operation,
+                ..
+            } if operation == "reading GPIO value"
+        ));
+        assert!(message.contains("expected a binary value"));
     }
 
     #[test]

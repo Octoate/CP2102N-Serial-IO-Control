@@ -49,5 +49,12 @@ fn run() -> Result<(), AppError> {
             println!("set {} {} to {}", device.port_name(), args.pin, args.state);
             Ok(())
         }
+        Command::Get(args) => {
+            let devices = discover_devices()?;
+            let device = select_device(&devices, &args.port)?;
+            let state = platform::get_pin(device.port_name(), args.pin.into())?;
+            println!("get {} {} = {state}", device.port_name(), args.pin);
+            Ok(())
+        }
     }
 }
