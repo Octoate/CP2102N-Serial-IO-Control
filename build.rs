@@ -1,6 +1,10 @@
+mod build_support;
+
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use build_support::profile_output_dir;
 
 const VENDOR_DLL: &str = "third_party/CP210xRuntime.dll";
 const DLL_NAME: &str = "CP210xRuntime.dll";
@@ -50,33 +54,4 @@ fn stage_runtime_dll() -> Result<(), String> {
     })?;
 
     Ok(())
-}
-
-fn profile_output_dir(out_dir: &Path) -> Result<PathBuf, String> {
-    let package_dir = out_dir.parent().ok_or_else(|| {
-        format!(
-            "cannot derive the profile output directory from OUT_DIR {}",
-            out_dir.display()
-        )
-    })?;
-    let build_dir = package_dir.parent().ok_or_else(|| {
-        format!(
-            "cannot derive the profile output directory from OUT_DIR {}",
-            out_dir.display()
-        )
-    })?;
-
-    if build_dir.file_name().and_then(|name| name.to_str()) != Some("build") {
-        return Err(format!(
-            "cannot derive the profile output directory from OUT_DIR {}; expected its parent to be named `build`",
-            out_dir.display()
-        ));
-    }
-
-    build_dir.parent().map(Path::to_path_buf).ok_or_else(|| {
-        format!(
-            "cannot derive the profile output directory from OUT_DIR {}",
-            out_dir.display()
-        )
-    })
 }

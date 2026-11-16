@@ -215,8 +215,9 @@ reconfiguration are out of scope.
 
 ## Development and validation
 
-Tests exercise parsing, identity/selector matching, latch calculations and
-readback, Windows pure helpers, and Linux sysfs mapping/planning without
+Tests exercise Cargo build-directory layout handling, parsing,
+identity/selector matching, latch calculations and readback, Windows pure
+helpers, and Linux sysfs mapping/planning without
 opening a real serial/GPIO device or writing to hardware. Hardware validation
 is a separate smoke test: verify the installed driver/runtime or kernel
 support, run `list`, read both supported pins with `get`, and test both states

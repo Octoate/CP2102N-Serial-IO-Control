@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
-serialport = "4.6"
+clap = { version = "4.6", features = ["derive"] }
+serialport = "4.10"
 thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
