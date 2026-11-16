@@ -10,7 +10,7 @@ const VENDOR_DLL: &str = "third_party/CP210xRuntime.dll";
 const DLL_NAME: &str = "CP210xRuntime.dll";
 
 fn main() {
-    if env::var_os("CARGO_CFG_WINDOWS").is_none() {
+    if env::var_os("CARGO_CFG_WINDOWS").is_none() || env::var_os("CARGO_FEATURE_CLI").is_none() {
         return;
     }
 

@@ -24,6 +24,18 @@ impl PortSelector {
     }
 }
 
+impl AsRef<str> for PortSelector {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for PortSelector {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 impl FromStr for PortSelector {
     type Err = PortSelectorError;
 
@@ -79,7 +91,7 @@ pub struct Cp2102nDevice {
 }
 
 impl Cp2102nDevice {
-    pub fn from_port_info(info: &SerialPortInfo) -> Option<Self> {
+    pub(crate) fn from_port_info(info: &SerialPortInfo) -> Option<Self> {
         let SerialPortType::UsbPort(usb_info) = &info.port_type else {
             return None;
         };
@@ -87,7 +99,7 @@ impl Cp2102nDevice {
         Self::from_usb_info(&info.port_name, usb_info)
     }
 
-    pub fn from_usb_info(port_name: &str, info: &UsbPortInfo) -> Option<Self> {
+    pub(crate) fn from_usb_info(port_name: &str, info: &UsbPortInfo) -> Option<Self> {
         if !Self::matches_identity(info.vid, info.pid) {
             return None;
         }
@@ -108,6 +120,14 @@ impl Cp2102nDevice {
 
     pub fn port_name(&self) -> &str {
         &self.port_name
+    }
+
+    pub const fn vendor_id(&self) -> u16 {
+        self.vendor_id
+    }
+
+    pub const fn product_id(&self) -> u16 {
+        self.product_id
     }
 
     pub fn usb_serial_number(&self) -> Option<&str> {
@@ -182,6 +202,8 @@ mod tests {
                 .unwrap();
 
         assert_eq!(device.port_name(), "COM3");
+        assert_eq!(device.vendor_id(), DEFAULT_VENDOR_ID);
+        assert_eq!(device.product_id(), DEFAULT_PRODUCT_ID);
         assert_eq!(device.usb_serial_number(), Some("CP2102N-123"));
         assert_eq!(device.manufacturer(), Some("Silicon Labs"));
         assert_eq!(device.product(), Some("CP2102N USB to UART Bridge"));

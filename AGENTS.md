@@ -8,12 +8,15 @@ the normal VCP serial connection.
 
 ## Source layout
 
-* `Cargo.toml` and `Cargo.lock` define the Rust 2024 binary and locked
-  dependencies.
-* `src/main.rs` parses the CLI, discovers the selected device, dispatches the
-  command, and converts errors to a nonzero exit status without panicking.
-* `src/cli.rs` contains the `clap` command model and validated `list`/`set`
-  arguments.
+* `Cargo.toml` and `Cargo.lock` define the Rust 2024 library, CLI binary, and
+  locked dependencies.
+* `src/lib.rs` defines the reusable public API and delegates GPIO operations
+  to the private platform boundary.
+* `src/bin/cp2102n-serial-io-control/main.rs` parses the CLI, discovers the
+  selected device through the library, dispatches the command, and converts
+  errors to a nonzero exit status without panicking.
+* `src/bin/cp2102n-serial-io-control/cli.rs` contains the `clap` command model
+  and validated `list`/`get`/`set` arguments.
 * `src/device.rs` contains the fixed VID/PID identity, USB metadata model, and
   `COM<number>`/`/dev/ttyUSB<number>`/`/dev/ttyACM<number>` selector rules.
 * `src/discovery.rs` wraps `serialport::available_ports()`, filters CP2102N

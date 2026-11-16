@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
 pub enum PortSelectorError {
     #[error("port selector must be non-empty and contain no whitespace")]
     EmptyOrWhitespace,
@@ -16,6 +17,7 @@ pub enum PortSelectorError {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AppError {
     #[error("invalid port selector: {0}")]
     InvalidPortSelector(#[from] PortSelectorError),

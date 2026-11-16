@@ -10,6 +10,54 @@ serial data for another program.
 The default device identity is Silicon Labs VID `0x10C4`, PID `0xEA60`.
 Custom VID/PID matching is not supported in this version.
 
+## Library usage
+
+The package provides both the `cp2102n-serial-io-control` executable and the
+`cp2102n_serial_io_control` Rust library. Add it as a dependency with the
+default CLI feature disabled when only the library is needed:
+
+```toml
+[dependencies]
+cp2102n-serial-io-control = { version = "0.1", default-features = false }
+```
+
+Discover devices, select an explicit port, and use the device methods for GPIO
+operations:
+
+```rust,no_run
+use cp2102n_serial_io_control::{
+    GpioPin, OutputState, discover_devices, select_device,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let devices = discover_devices()?;
+    let selector = "COM7".parse()?; // Use /dev/ttyUSB0 or /dev/ttyACM0 on Linux.
+    let device = select_device(&devices, &selector)?;
+
+    device.set_pin(GpioPin::Gpio2, OutputState::High)?;
+    let state = device.get_pin(GpioPin::Gpio2)?;
+    println!("GPIO2 is {state}");
+    Ok(())
+}
+```
+
+`discover_devices` returns an empty vector when no supported board is present;
+the library does not turn that normal result into an error. `select_device`
+requires an exact selector match and reports missing or ambiguous matches.
+`get_pin` and `set_pin` return the structured library `Error` type on failure.
+The crate root also exports a convenient `Result<T>` alias.
+
+The device value contains discovery-time metadata. Discover and select the
+board again after unplugging, replugging, or changing its port mapping. Each
+GPIO call uses the platform backend directly; the API does not keep a serial
+port or GPIO line open between calls. As with the CLI, `set_pin` performs a real
+hardware write and must only be used after checking the pin, wiring, and target
+voltage.
+
+The default `cli` feature builds the command-line executable and enables
+`clap`. Library-only consumers should use `default-features = false` as above;
+this avoids the CLI dependency and Windows DLL staging during their build.
+
 ## Commands
 
 Run the binary as `cp2102n-serial-io-control` below, or use `cargo run --` while
@@ -103,6 +151,13 @@ requests only the selected line as an output with the requested value.
    distribution, ship the executable and `CP210xRuntime.dll` together in the
    same directory. The DLL architecture must match the executable, and it
    must export `CP210xRT_ReadLatch` and `CP210xRT_WriteLatch`.
+
+   When another Rust application uses the library, the relevant executable is
+   that consuming application, not the CLI. Place a compatible
+   `CP210xRuntime.dll` beside the consuming executable yourself; the library
+   does not copy it into the consuming application's output directory. This
+   placement is required at GPIO operation time, not while compiling a
+   library-only dependency with default features disabled.
 3. The runtime DLL is a vendor binary. Use a Silicon Labs/vendor-approved
    CP2102N-compatible version and verify that its applicable redistribution
    terms permit shipping it with the application. Do not substitute an

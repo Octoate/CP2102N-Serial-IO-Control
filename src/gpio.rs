@@ -1,5 +1,4 @@
 use crate::error::AppError;
-use clap::ValueEnum;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GpioPin {
@@ -15,7 +14,7 @@ impl GpioPin {
         }
     }
 
-    pub const fn mask(self) -> u8 {
+    pub(crate) const fn mask(self) -> u8 {
         1 << self.number()
     }
 }
@@ -38,7 +37,7 @@ impl std::fmt::Display for GpioPin {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputState {
     High,
     Low,
@@ -53,14 +52,14 @@ impl std::fmt::Display for OutputState {
     }
 }
 
-pub const fn update_latch(latch: u8, pin: GpioPin, state: OutputState) -> u8 {
+pub(crate) const fn update_latch(latch: u8, pin: GpioPin, state: OutputState) -> u8 {
     match state {
         OutputState::High => latch | pin.mask(),
         OutputState::Low => latch & !pin.mask(),
     }
 }
 
-pub const fn state_from_latch(latch: u8, pin: GpioPin) -> OutputState {
+pub(crate) const fn state_from_latch(latch: u8, pin: GpioPin) -> OutputState {
     if latch & pin.mask() == 0 {
         OutputState::Low
     } else {
@@ -69,7 +68,7 @@ pub const fn state_from_latch(latch: u8, pin: GpioPin) -> OutputState {
 }
 
 #[cfg(any(target_os = "linux", test))]
-pub const fn state_from_value(value: u8) -> Option<OutputState> {
+pub(crate) const fn state_from_value(value: u8) -> Option<OutputState> {
     match value {
         0 => Some(OutputState::Low),
         1 => Some(OutputState::High),
@@ -77,13 +76,13 @@ pub const fn state_from_value(value: u8) -> Option<OutputState> {
     }
 }
 
-pub trait GpioController {
+pub(crate) trait GpioController {
     fn read_latch(&mut self, port: &str) -> Result<u8, AppError>;
 
     fn write_latch(&mut self, port: &str, mask: u8, latch: u8) -> Result<(), AppError>;
 }
 
-pub fn set_pin<C: GpioController>(
+pub(crate) fn set_pin<C: GpioController>(
     controller: &mut C,
     port: &str,
     pin: GpioPin,
@@ -97,7 +96,7 @@ pub fn set_pin<C: GpioController>(
     controller.write_latch(port, pin.mask(), new_latch)
 }
 
-pub fn read_pin<C: GpioController>(
+pub(crate) fn read_pin<C: GpioController>(
     controller: &mut C,
     port: &str,
     pin: GpioPin,

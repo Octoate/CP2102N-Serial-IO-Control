@@ -2,9 +2,7 @@ use std::fmt;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::{device::PortSelector, gpio::GpioPin};
-
-pub use crate::gpio::OutputState;
+use cp2102n_serial_io_control::{GpioPin, OutputState, PortSelector};
 
 #[derive(Debug, Parser, PartialEq, Eq)]
 #[command(
@@ -44,7 +42,7 @@ pub struct SetArgs {
     pub pin: Pin,
     /// Requested output latch state.
     #[arg(long, value_enum, ignore_case = true, value_name = "high|low")]
-    pub state: OutputState,
+    pub state: State,
 }
 
 #[derive(Debug, Args, PartialEq, Eq)]
@@ -74,24 +72,36 @@ impl From<Pin> for GpioPin {
     }
 }
 
-impl Pin {
-    pub const fn number(self) -> u8 {
-        match self {
-            Self::Gpio2 => 2,
-            Self::Gpio3 => 3,
+impl fmt::Display for Pin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&GpioPin::from(*self), formatter)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum State {
+    High,
+    Low,
+}
+
+impl From<State> for OutputState {
+    fn from(state: State) -> Self {
+        match state {
+            State::High => Self::High,
+            State::Low => Self::Low,
         }
     }
 }
 
-impl fmt::Display for Pin {
+impl fmt::Display for State {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "GPIO{}", self.number())
+        fmt::Display::fmt(&OutputState::from(*self), formatter)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, GetArgs, ListArgs, OutputState, Pin, SetArgs};
+    use super::{Cli, Command, GetArgs, ListArgs, Pin, SetArgs, State};
     use clap::Parser;
 
     #[test]
@@ -120,7 +130,7 @@ mod tests {
             Command::Set(SetArgs {
                 port: "COM12".parse().unwrap(),
                 pin: Pin::Gpio3,
-                state: OutputState::High,
+                state: State::High,
             })
         );
     }
