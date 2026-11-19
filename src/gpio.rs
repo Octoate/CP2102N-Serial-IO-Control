@@ -14,7 +14,7 @@ impl GpioPin {
         }
     }
 
-    pub(crate) const fn mask(self) -> u8 {
+    pub(crate) const fn mask(self) -> u16 {
         1 << self.number()
     }
 }
@@ -52,14 +52,16 @@ impl std::fmt::Display for OutputState {
     }
 }
 
-pub(crate) const fn update_latch(latch: u8, pin: GpioPin, state: OutputState) -> u8 {
+// The CP210x runtime API uses 16-bit WORD latch and mask values, even though
+// a CP2102N only uses the low byte for its GPIOs.
+pub(crate) const fn update_latch(latch: u16, pin: GpioPin, state: OutputState) -> u16 {
     match state {
         OutputState::High => latch | pin.mask(),
         OutputState::Low => latch & !pin.mask(),
     }
 }
 
-pub(crate) const fn state_from_latch(latch: u8, pin: GpioPin) -> OutputState {
+pub(crate) const fn state_from_latch(latch: u16, pin: GpioPin) -> OutputState {
     if latch & pin.mask() == 0 {
         OutputState::Low
     } else {
@@ -77,9 +79,9 @@ pub(crate) const fn state_from_value(value: u8) -> Option<OutputState> {
 }
 
 pub(crate) trait GpioController {
-    fn read_latch(&mut self, port: &str) -> Result<u8, AppError>;
+    fn read_latch(&mut self, port: &str) -> Result<u16, AppError>;
 
-    fn write_latch(&mut self, port: &str, mask: u8, latch: u8) -> Result<(), AppError>;
+    fn write_latch(&mut self, port: &str, mask: u16, latch: u16) -> Result<(), AppError>;
 }
 
 pub(crate) fn set_pin<C: GpioController>(
@@ -155,6 +157,22 @@ mod tests {
     }
 
     #[test]
+    fn preserves_latch_bits_above_the_low_byte() {
+        assert_eq!(GpioPin::Gpio2.mask(), 0x0004);
+        assert_eq!(GpioPin::Gpio3.mask(), 0x0008);
+        assert_eq!(
+            update_latch(0x1200, GpioPin::Gpio2, OutputState::High),
+            0x1204
+        );
+        assert_eq!(
+            update_latch(0x1204, GpioPin::Gpio2, OutputState::Low),
+            0x1200
+        );
+        assert_eq!(state_from_latch(0x1204, GpioPin::Gpio2), OutputState::High);
+        assert_eq!(state_from_latch(0x1200, GpioPin::Gpio2), OutputState::Low);
+    }
+
+    #[test]
     fn decodes_only_binary_line_values() {
         assert_eq!(state_from_value(0), Some(OutputState::Low));
         assert_eq!(state_from_value(1), Some(OutputState::High));
@@ -171,16 +189,16 @@ mod tests {
 
     #[derive(Default)]
     struct FakeController {
-        current_latch: u8,
-        write: Option<(String, u8, u8)>,
+        current_latch: u16,
+        write: Option<(String, u16, u16)>,
     }
 
     impl GpioController for FakeController {
-        fn read_latch(&mut self, _port: &str) -> Result<u8, AppError> {
+        fn read_latch(&mut self, _port: &str) -> Result<u16, AppError> {
             Ok(self.current_latch)
         }
 
-        fn write_latch(&mut self, port: &str, mask: u8, latch: u8) -> Result<(), AppError> {
+        fn write_latch(&mut self, port: &str, mask: u16, latch: u16) -> Result<(), AppError> {
             self.write = Some((port.to_owned(), mask, latch));
             Ok(())
         }
@@ -189,16 +207,13 @@ mod tests {
     #[test]
     fn controller_service_preserves_unselected_latch_bits() {
         let mut controller = FakeController {
-            current_latch: 0b1010_0000,
+            current_latch: 0x1200,
             ..FakeController::default()
         };
 
         set_pin(&mut controller, "COM7", GpioPin::Gpio2, OutputState::High).unwrap();
 
-        assert_eq!(
-            controller.write,
-            Some(("COM7".to_owned(), 0b0000_0100, 0b1010_0100))
-        );
+        assert_eq!(controller.write, Some(("COM7".to_owned(), 0x0004, 0x1204)));
     }
 
     #[test]

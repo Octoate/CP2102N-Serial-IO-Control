@@ -150,7 +150,9 @@ requests only the selected line as an output with the requested value.
    caller's working directory or `PATH` is not used. For a release
    distribution, ship the executable and `CP210xRuntime.dll` together in the
    same directory. The DLL architecture must match the executable, and it
-   must export `CP210xRT_ReadLatch` and `CP210xRT_WriteLatch`.
+   must export `CP210xRT_ReadLatch` and `CP210xRT_WriteLatch`. Those runtime
+   functions use 16-bit `WORD` latch and mask values, which the backend
+   mirrors.
 
    When another Rust application uses the library, the relevant executable is
    that consuming application, not the CLI. Place a compatible
@@ -217,8 +219,11 @@ Each Linux `get` operation opens the associated chip, requests only GPIO2 or
 GPIO3 with its current configuration left as-is, reads the line value, and
 releases the line. It does not call a write operation or change the line
 direction. A Linux `set` operation instead requests only the selected line as
-an output, sets its value, and releases the line. A line claimed by another
-kernel or userspace consumer is reported as busy rather than forcibly taken.
+an output, sets its value, and releases the line. Because the line is not held
+after the command exits, the set level is not guaranteed to persist if another
+process claims or reconfigures that line, and it must not be used as a safety
+interlock. A line claimed by another kernel or userspace consumer is reported
+as busy rather than forcibly taken.
 The selected GPIO must already be available in the CP2102N configuration;
 `set` also requires it to be usable as an output.
 

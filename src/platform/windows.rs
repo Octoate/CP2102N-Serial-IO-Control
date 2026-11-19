@@ -21,8 +21,10 @@ const ERROR_ACCESS_DENIED: u32 = 5;
 const ERROR_SHARING_VIOLATION: u32 = 32;
 const ERROR_LOCK_VIOLATION: u32 = 33;
 
-type ReadLatch = unsafe extern "system" fn(HANDLE, *mut u8) -> u32;
-type WriteLatch = unsafe extern "system" fn(HANDLE, u8, u8) -> u32;
+// Silicon Labs declares these as WORD/LPWORD, i.e. 16-bit latch and mask
+// values, in CP210xRuntimeDLL.h and AN223.
+type ReadLatch = unsafe extern "system" fn(HANDLE, *mut u16) -> u32;
+type WriteLatch = unsafe extern "system" fn(HANDLE, u16, u16) -> u32;
 
 pub fn set_pin(port: &str, pin: GpioPin, state: OutputState) -> Result<(), AppError> {
     let mut controller = WindowsGpioController::new()?;
@@ -47,12 +49,12 @@ impl WindowsGpioController {
 }
 
 impl GpioController for WindowsGpioController {
-    fn read_latch(&mut self, port: &str) -> Result<u8, AppError> {
+    fn read_latch(&mut self, port: &str) -> Result<u16, AppError> {
         let handle = ComHandle::open(port)?;
         self.runtime.read_latch(handle.raw())
     }
 
-    fn write_latch(&mut self, port: &str, mask: u8, latch: u8) -> Result<(), AppError> {
+    fn write_latch(&mut self, port: &str, mask: u16, latch: u16) -> Result<(), AppError> {
         let handle = ComHandle::open(port)?;
         self.runtime.write_latch(handle.raw(), mask, latch)
     }
@@ -87,14 +89,14 @@ impl Runtime {
         Ok(Self { library })
     }
 
-    fn read_latch(&self, handle: HANDLE) -> Result<u8, AppError> {
+    fn read_latch(&self, handle: HANDLE) -> Result<u16, AppError> {
         let function = self.symbol::<ReadLatch>(b"CP210xRT_ReadLatch\0", "CP210xRT_ReadLatch")?;
-        let mut latch = 0;
+        let mut latch = 0u16;
         let status = unsafe { function(handle, &mut latch) };
         runtime_status("reading the GPIO latch", status).map(|()| latch)
     }
 
-    fn write_latch(&self, handle: HANDLE, mask: u8, latch: u8) -> Result<(), AppError> {
+    fn write_latch(&self, handle: HANDLE, mask: u16, latch: u16) -> Result<(), AppError> {
         let function =
             self.symbol::<WriteLatch>(b"CP210xRT_WriteLatch\0", "CP210xRT_WriteLatch")?;
         let status = unsafe { function(handle, mask, latch) };
@@ -210,10 +212,22 @@ fn runtime_status(operation: &str, status: u32) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CP210X_DEVICE_IO_FAILED, ERROR_SHARING_VIOLATION, normalize_com_path, open_port_error,
-        runtime_status,
+        CP210X_DEVICE_IO_FAILED, ERROR_SHARING_VIOLATION, ReadLatch, WriteLatch,
+        normalize_com_path, open_port_error, runtime_status,
     };
     use crate::error::AppError;
+    use windows_sys::Win32::Foundation::HANDLE;
+
+    #[test]
+    fn latch_function_types_match_the_vendor_word_api() {
+        // CP210xRT_ReadLatch(HANDLE, LPWORD) and CP210xRT_WriteLatch(HANDLE, WORD, WORD).
+        fn expect_word_api(_read: Option<ReadLatch>, _write: Option<WriteLatch>) {}
+
+        expect_word_api(
+            None::<unsafe extern "system" fn(HANDLE, *mut u16) -> u32>,
+            None::<unsafe extern "system" fn(HANDLE, u16, u16) -> u32>,
+        );
+    }
 
     #[test]
     fn normalizes_single_digit_com_ports_for_create_file() {
